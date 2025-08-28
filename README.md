@@ -73,7 +73,8 @@ python main.py
 
 ## 📸 Screenshots 
 
-> Add screenshots here (dashboard, upload, chat).
+> <img width="1243" height="903" alt="image" src="https://github.com/user-attachments/assets/7fd6ac85-5fa8-4981-a796-6c9cdd24212f" />
+
 
 ## 🧪 Tester
 
