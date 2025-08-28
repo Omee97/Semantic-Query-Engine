@@ -107,4 +107,3 @@ No license specified yet. Consider adding MIT/Apache‑2.0 for open collaboratio
 
 ---
 
-If you want, I can add deployment templates (Render/Heroku) and CI for linting and type checks.
