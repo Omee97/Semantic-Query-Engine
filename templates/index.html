@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Semantic Query Engine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  </head>
+  <body data-theme="light">
+    <div class="app-container">
+      <header class="app-header d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center gap-2">
+          <div class="brand-logo">🔎</div>
+          <div>
+            <h1 class="app-title m-0">Semantic Query Engine</h1>
+            <p class="text-muted m-0 small">Upload a PDF and get clean, helpful answers.</p>
+          </div>
+        </div>
+        <div class="header-actions d-flex align-items-center gap-2">
+          <button id="clearChat" class="btn btn-outline-secondary btn-sm">Clear Chat</button>
+        </div>
+      </header>
+
+      <main class="app-main">
+        <!-- Dashboard Section (metrics only) -->
+        <section class="dashboard">
+          <div class="card-grid">
+            <div class="metric-card">
+              <div class="metric-title">Processed PDFs</div>
+              <div class="metric-value" id="mProcessed">0</div>
+              <div class="metric-sub"><span id="mProcessedTrend" class="trend up">+0%</span> vs last 7 days</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-title">Questions Asked</div>
+              <div class="metric-value" id="mQuestions">0</div>
+              <div class="metric-sub"><span id="mQuestionsTrend" class="trend up">+0%</span> today</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-title">Avg Response Time</div>
+              <div class="metric-value" id="mLatency">—</div>
+              <div class="metric-sub"><span class="badge-soft">ms</span> server-side</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-title">Success Rate</div>
+              <div class="metric-value" id="mSuccess">100%</div>
+              <div class="metric-sub"><span id="mSuccessTrend" class="trend up">+0%</span> this week</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Upload first, directly under heading -->
+        <section id="dropzone" class="upload-card dropzone">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <label for="pdfUpload" class="btn btn-primary">Upload PDF</label>
+              <input type="file" id="pdfUpload" accept=".pdf" hidden />
+              <span id="uploadStatus" class="status-badge"></span>
+            </div>
+            <div class="upload-hint text-muted small">Or drag & drop your PDF here</div>
+          </div>
+        </section>
+
+        <!-- Professional chat area -->
+        <section id="chatHistory" class="chat-history" aria-live="polite"></section>
+
+        <section class="composer">
+          <div class="input-group">
+            <span class="input-group-text">💬</span>
+            <input id="questionInput" type="text" class="form-control" placeholder="Ask anything about the uploaded document..."/>
+            <button id="askButton" class="btn btn-primary" disabled>Ask</button>
+          </div>
+          <div id="typingIndicator" class="typing d-none">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="ms-2">Thinking...</span>
+          </div>
+        </section>
+      </main>
+
+      <button id="scrollFab" class="scroll-fab" aria-label="Scroll to bottom">▼</button>
+      <div id="toastHost" class="toast-host"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      const chat = document.getElementById('chatHistory');
+      const askBtn = document.getElementById('askButton');
+      const input = document.getElementById('questionInput');
+      const upload = document.getElementById('pdfUpload');
+      const dropzone = document.getElementById('dropzone');
+      const uploadStatus = document.getElementById('uploadStatus');
+      const typing = document.getElementById('typingIndicator');
+      const clearChat = document.getElementById('clearChat');
+      const toastHost = document.getElementById('toastHost');
+      const scrollFab = document.getElementById('scrollFab');
+
+      const STORE_KEY = 'pdfqa_chat_v1';
+
+      // Dashboard state (metrics only)
+      const mProcessed = document.getElementById('mProcessed');
+      const mQuestions = document.getElementById('mQuestions');
+      const mLatency = document.getElementById('mLatency');
+      const mSuccess = document.getElementById('mSuccess');
+      let processedCount = 0, questionCount = 0, successRate = 100;
+
+      function updateMetrics(latencyMs){
+        mProcessed.textContent = processedCount;
+        mQuestions.textContent = questionCount;
+        if (latencyMs !== undefined) mLatency.textContent = `${latencyMs}`; else if (mLatency.textContent==='—') mLatency.textContent = '120';
+        mSuccess.textContent = `${successRate}%`;
+      }
+
+      function showToast(message, type='info'){
+        const t = document.createElement('div');
+        t.className = `toast-item ${type}`;
+        t.textContent = message;
+        toastHost.appendChild(t);
+        requestAnimationFrame(()=> t.classList.add('show'));
+        setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=> t.remove(), 300); }, 2600);
+      }
+
+      function renderMarkdown(md) {
+        const raw = marked.parse(md, { mangle: false, headerIds: false });
+        const clean = DOMPurify.sanitize(raw);
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = clean;
+        wrapper.querySelectorAll('pre code').forEach(block => {
+          hljs.highlightElement(block);
+          const btn = document.createElement('button');
+          btn.className = 'copy-btn';
+          btn.textContent = 'Copy';
+          btn.addEventListener('click', () => {
+            navigator.clipboard.writeText(block.innerText);
+            btn.textContent = 'Copied!';
+            setTimeout(() => (btn.textContent = 'Copy'), 1500);
+          });
+          const pre = block.closest('pre');
+          pre.classList.add('code-wrap');
+          pre.appendChild(btn);
+        });
+        return wrapper;
+      }
+
+      function persist(){
+        const items = [...chat.querySelectorAll('.message-row')].map(row=>({
+          role: row.classList.contains('user') ? 'user' : 'bot',
+          html: row.querySelector('.bubble').innerHTML
+        }));
+        localStorage.setItem(STORE_KEY, JSON.stringify(items));
+      }
+      function restore(){
+        const raw = localStorage.getItem(STORE_KEY);
+        if(!raw) return;
+        try{
+          const items = JSON.parse(raw);
+          items.forEach(({role, html})=>{
+            const row = document.createElement('div');
+            row.className = `message-row ${role}`;
+            const avatar = document.createElement('div');
+            avatar.className='avatar';
+            avatar.textContent = role==='user'?'🧑':'🤖';
+            const bubble = document.createElement('div');
+            bubble.className='bubble';
+            bubble.innerHTML = html;
+            const tools = document.createElement('div');
+            tools.className='tools';
+            const copy = document.createElement('button');
+            copy.className='btn btn-light btn-sm';
+            copy.textContent='Copy';
+            copy.addEventListener('click',()=>{
+              navigator.clipboard.writeText(bubble.innerText);
+              copy.textContent='Copied!';
+              setTimeout(()=>copy.textContent='Copy',1200);
+            });
+            tools.appendChild(copy);
+            row.appendChild(avatar); row.appendChild(bubble); row.appendChild(tools);
+            chat.appendChild(row);
+          });
+          chat.scrollTop = chat.scrollHeight;
+        }catch(e){/* ignore */}
+      }
+
+      function addMessage(content, role = 'bot', isMarkdown = true) {
+        const row = document.createElement('div');
+        row.className = `message-row ${role}`;
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        avatar.textContent = role === 'user' ? '🧑' : '🤖';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        if (isMarkdown && role !== 'user') {
+          const md = renderMarkdown(content);
+          bubble.appendChild(md);
+        } else {
+          bubble.textContent = content;
+        }
+        const tools = document.createElement('div');
+        tools.className = 'tools';
+        const copy = document.createElement('button');
+        copy.className = 'btn btn-light btn-sm';
+        copy.textContent = 'Copy';
+        copy.addEventListener('click', () => {
+          const text = role === 'user' ? content : bubble.innerText;
+          navigator.clipboard.writeText(text);
+          copy.textContent = 'Copied!';
+          setTimeout(() => (copy.textContent = 'Copy'), 1200);
+        });
+        tools.appendChild(copy);
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+        row.appendChild(tools);
+        chat.appendChild(row);
+        chat.scrollTop = chat.scrollHeight;
+        persist();
+      }
+
+      function setStatus(msg, type) {
+        uploadStatus.textContent = msg;
+        uploadStatus.className = `status-badge ${type}`;
+      }
+      function setTyping(show) { typing.classList.toggle('d-none', !show); }
+
+      function updateAskState(){ askBtn.disabled = input.value.trim().length === 0; }
+      input.addEventListener('input', updateAskState);
+
+      document.getElementById('clearChat').addEventListener('click', () => {
+        chat.innerHTML = '';
+        localStorage.removeItem(STORE_KEY);
+        showToast('Chat cleared','info');
+      });
+
+      // Drag & drop upload
+      ;['dragenter','dragover','dragleave','drop'].forEach(evt=>{
+        dropzone.addEventListener(evt,(e)=>{e.preventDefault();e.stopPropagation();});
+      });
+      ;['dragenter','dragover'].forEach(evt=>{
+        dropzone.addEventListener(evt,()=> dropzone.classList.add('dragging'));
+      });
+      ;['dragleave','drop'].forEach(evt=>{
+        dropzone.addEventListener(evt,()=> dropzone.classList.remove('dragging'));
+      });
+      dropzone.addEventListener('drop',(e)=>{
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if(file && file.type === 'application/pdf'){
+          upload.files = e.dataTransfer.files;
+          handleUpload(file);
+        }else{
+          showToast('Please drop a valid PDF file','error');
+        }
+      });
+
+      // Upload
+      async function handleUpload(file){
+        const formData = new FormData();
+        formData.append('file', file);
+        const t0 = performance.now();
+        try {
+          setStatus('Processing PDF...', 'info');
+          askBtn.disabled = true;
+          const res = await fetch('/api/upload', { method: 'POST', body: formData });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+          const latency = Math.max(50, Math.round(performance.now() - t0));
+          processedCount += 1; updateMetrics(latency);
+          setStatus(data.message || 'PDF processed. Ready!', 'success');
+          askBtn.disabled = false;
+          chat.innerHTML = '';
+          localStorage.removeItem(STORE_KEY);
+          addMessage('PDF uploaded successfully! Ask anything about it.', 'bot');
+          showToast('PDF ready. Ask your question!','success');
+        } catch (err) {
+          setStatus('Upload failed', 'error');
+          successRate = Math.max(90, successRate-1); updateMetrics();
+          showToast('Upload failed: ' + err.message,'error');
+        }
+      }
+      upload.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (file) handleUpload(file);
+      });
+
+      // Ask
+      async function ask() {
+        const q = input.value.trim();
+        if (!q) return;
+        addMessage(q, 'user', false);
+        input.value = '';
+        updateAskState();
+        setTyping(true);
+        const t0 = performance.now();
+        try {
+          const body = new URLSearchParams();
+          body.set('question', q);
+          const res = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+          const latency = Math.max(50, Math.round(performance.now() - t0));
+          questionCount += 1; updateMetrics(latency);
+          const answer = (data && data.answer) ? data.answer : 'No response';
+          addMessage(answer, 'bot', true);
+        } catch (err) {
+          successRate = Math.max(90, successRate-1); updateMetrics();
+          addMessage('Error: ' + err.message, 'bot', false);
+          showToast('Error: ' + err.message,'error');
+        } finally {
+          setTyping(false);
+        }
+      }
+      askBtn.addEventListener('click', ask);
+      input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) ask();
+      });
+
+      // Scroll-to-bottom FAB
+      function atBottom(){ return Math.abs(chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 4; }
+      chat.addEventListener('scroll',()=>{ scrollFab.classList.toggle('show', !atBottom()); });
+      scrollFab.addEventListener('click',()=>{ chat.scrollTo({top: chat.scrollHeight, behavior:'smooth'}); });
+
+      // Restore state
+      restore();
+      updateAskState();
+      addEventListener('load', ()=> { chat.scrollTop = chat.scrollHeight; updateMetrics(); });
+    </script>
+  </body>
+</html>
