@@ -71,7 +71,7 @@ python main.py
 - Index metric: cosine; embedding dimension: 768.
 - Top‑k is adaptive based on question complexity.
 
-## 📸 Screenshots (optional)
+## 📸 Screenshots 
 
 > Add screenshots here (dashboard, upload, chat).
 
